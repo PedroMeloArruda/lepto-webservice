@@ -1,0 +1,17 @@
+name: base
+channels:
+    - conda-forge
+    - bioconda
+dependencies:
+    - python=3.11
+    - fastani=1.34
+    - blast=2.17.0
+    - fastapi
+    - uvicorn
+    - python-multipart
+    - pandas
+    - numpy
+    - joblib
+    - matplotlib
+    - scikit-learn=1.6.1
+    - imbalanced-learn=0.13.0
