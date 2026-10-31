@@ -11,6 +11,7 @@ import uuid
 import logging
 import warnings
 import tempfile
+from functools import lru_cache
 
 import pandas as pd
 import numpy as np
@@ -23,16 +24,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 
 app = FastAPI()
 
-# ─────────────────────────────────────────────
-# LOGGING / DEPURAÇÃO
-# Cada requisição tem um "job id" curto.
-#
-# REGRA DE PRIVACIDADE:
-#   - `message` é o texto SEGURO: vai para o terminal E para a página.
-#     Nunca coloque nele caminhos, nomes de arquivo, stderr, comandos
-#     ou mensagens de exceção.
-#   - `detail` é o texto SENSÍVEL: vai SÓ para o terminal do servidor.
-# ─────────────────────────────────────────────
+
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)-7s %(message)s",
@@ -48,8 +40,8 @@ class JobLog:
 
     def __init__(self, job_id):
         self.job_id = job_id
-        self.lines = []             # só mensagens seguras (mostradas na página)
-        self.has_problems = False   # True se houve WARNING ou ERROR
+        self.lines = []             
+        self.has_problems = False   
 
     def _add(self, level_name, level_number, step, message, detail=None):
         self.lines.append(f"{level_name:<7} [{step}] {message}")
@@ -75,17 +67,14 @@ class JobLog:
         self._add("ERROR", logging.ERROR, step, message, detail)
 
     def exception(self, step, message, detail=None):
-        """Chamar DENTRO de um 'except'. A página recebe só `message`;
-        o traceback completo (que pode ter caminhos) fica no terminal."""
+        
         self.has_problems = True
         self.lines.append(f"ERROR   [{step}] {message}")
         full_message = f"{message} | {detail}" if detail else message
         logger.error("[job %s] [%s] %s", self.job_id[:8], step, full_message, exc_info=True)
 
 
-# ─────────────────────────────────────────────
-# CONFIGURAÇÕES
-# ─────────────────────────────────────────────
+#configuracoes
 
 FASTANI   = "fastANI"
 THREADS   = 8
@@ -103,14 +92,10 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 
 ALLOWED_EXTENSIONS = (".fa", ".fasta", ".fna")
 
-# Frase padrão para problemas que só o administrador pode resolver
+
 CONTACT_ADMIN = "This is a server-side problem. Please contact the administrator and mention the job code."
 
-# ─────────────────────────────────────────────
-# PRÉ-CARREGAMENTO DAS FEATURES
-# Lê os TSVs uma única vez na inicialização do servidor.
-# Assim não relê do disco a cada requisição.
-# ─────────────────────────────────────────────
+#pre carregamento features
 
 def _load_features(path):
     """Lê o cabeçalho de um TSV e retorna só as colunas de proteína."""
@@ -118,37 +103,33 @@ def _load_features(path):
     df   = pd.read_csv(path, sep="\t", nrows=0)
     return [c for c in df.columns if c not in drop]
 
-# Estágio 1: todos os modelos de classe usam as features do TSV geral
+# tsv geral 
 GLOBAL_FEATURES = _load_features(
     os.path.join(FEATURES_DIR, "general_table_identity_rep.tsv")
 )
 
-# Estágio 2: cada classe tem seu próprio TSV com subconjunto de features
+# tsv das classes 
 CLASS_FEATURES = {
     cl: _load_features(os.path.join(FEATURES_DIR, f"table_identity_cl_{cl}.tsv"))
     for cl in range(1, 5)
 }
 
-# PCAs de referência (geral + classes 1-4), calculados uma vez na inicialização
+#gerador de pca
 PCAS = geradorPCA.carregar_todos(FEATURES_DIR)
 
 logger.info("Started: %d general features, %d PCA models, REF_DIR=%s",
             len(GLOBAL_FEATURES), len(PCAS), REF_DIR)
 
 
-# ─────────────────────────────────────────────
-# FUNÇÕES AUXILIARES — arquivos e nomes
-# ─────────────────────────────────────────────
+#funçeos de arquivos e nomes (auxilio)
 
-# Aceita GCF_/GCA_ + 9 dígitos + versão com "." OU "_" (ex.: GCF_000007685.1
-# e GCA_945887855_1). O nome do arquivo pode ter qualquer prefixo/sufixo.
+
 ACCESSION_PATTERN = re.compile(r"(GC[FA])_(\d{9})(?:[._](\d+))?")
 
-# Gêneros da ordem Leptospirales: se aparecerem no cabeçalho, são a fonte
-# mais confiável do nome da espécie.
+#procura por padrões caso seja algo mais conhecido
 SPECIES_PATTERN = re.compile(r"\b(Leptospira|Leptonema|Turneriella)\s+([a-z][A-Za-z0-9.\-]*)")
 
-# Palavras comuns de cabeçalho que NÃO são gênero (evita "Complete genome" etc.)
+# Palavras comuns 
 NON_GENUS_WORDS = {
     "Complete", "Whole", "Chromosome", "Plasmid", "Contig", "Scaffold", "Genome",
     "Draft", "Strain", "Serovar", "Isolate", "MAG", "Shotgun", "Genomic",
@@ -234,11 +215,11 @@ def validate_genome_fasta(file_path, log):
 
 def extract_species(fasta_file, log):
     """
-    Lê os primeiros cabeçalhos do FASTA e extrai o nome da espécie.
-    1) procura 'Leptospira xxx' (ou Leptonema/Turneriella);
-    2) senão, procura um par 'Gênero espécie' ignorando palavras comuns
-       como 'Complete genome';
-    3) senão, devolve 'Unknown' e registra o motivo.
+    le os cabeçalhos fasta e cospe o nome da especie
+
+    procura por "leptosira *algo*" se não achar usa as palavras comuns pra achar algo semelhante
+
+    se não solta um unknown
     """
     first_header = None
     headers_checked = 0
@@ -271,9 +252,10 @@ def extract_species(fasta_file, log):
 
 def extract_gcf(filename, log):
     """
-    Extrai o código do genoma (GCF_ ou GCA_) do nome do arquivo.
-    Se não houver código, devolve o próprio nome do arquivo (sem extensão)
-    em vez de 'Unknown', e registra o aviso.
+
+    acha o codigo GCF ou GCA, se não achar cospe o nome do arquivo sem a extensao,
+    tem aviso
+
     """
     base = os.path.basename(filename)
     match = ACCESSION_PATTERN.search(base)
@@ -288,21 +270,21 @@ def extract_gcf(filename, log):
     return stem
 
 
-# ─────────────────────────────────────────────
-# FUNÇÕES AUXILIARES — FastANI
-# ─────────────────────────────────────────────
+#funcoes do fastani (auxiliares tmb)
 
 _IMPORTANT_STDERR_PATTERN = re.compile(
     r"\b(warn\w*|error\w*|skip\w*|cannot|could not|fail\w*|invalid|empty)\b", re.IGNORECASE)
 
 
 def report_fastani_stderr(stderr_text, log):
-    """O stderr do FastANI é quase todo mensagem de progresso e contém caminhos de
-    arquivos. A página mostra só a CONTAGEM de linhas suspeitas; o texto vai ao terminal."""
+
+    """
+    O stderr do FastANI é quase todo mensagem de progresso e contém caminhos de
+    arquivos. A página mostra só a CONTAGEM de linhas suspeitas; o texto vai ao terminal.
+    """
+    
     step = "FASTANI"
     lines = [line.strip() for line in stderr_text.splitlines() if line.strip()]
-    # Ignora as linhas "Reference = [...]" / "Query = [...]": só listam caminhos de arquivos
-    # (um nome de arquivo com a palavra "empty", por exemplo, não é um aviso).
     important = [line for line in lines
                  if not line.startswith(("Reference =", "Query ="))
                  and _IMPORTANT_STDERR_PATTERN.search(line)]
@@ -315,9 +297,13 @@ def report_fastani_stderr(stderr_text, log):
 
 
 def inspect_reference_files(reference_paths, log):
-    """Abre o início de cada referência e procura arquivos que o FastANI não
+    """
+    Abre o início de cada referência e procura arquivos que o FastANI não
     consegue usar (vazios, compactados .gz, sem '>' ou que são proteína).
-    Retorna a lista de (nome, problema). Nomes e problemas ficam só no terminal."""
+    Retorna a lista de (nome, problema). Nomes e problemas ficam só no terminal.
+
+    
+    """
     step = "DIAGNOSIS"
     problems = []
     for reference_path in reference_paths:
@@ -850,10 +836,15 @@ async def analyze(file: UploadFile = File(...)):
         shutil.rmtree(job_dir, ignore_errors=True)
 
 
-# Página com os 5 PCAs de referência (sem precisar enviar genoma)
+# Página com os 5 PCAs de referência (gerada uma vez e reaproveitada)
+@lru_cache(maxsize=1)
+def _pca_reference_html():
+    return html_pages.build_pca_reference_page(PCAS)
+
+
 @app.get("/pca", response_class=HTMLResponse)
 def pca_page():
-    return html_pages.build_pca_reference_page(PCAS)
+    return _pca_reference_html()
 
 
 @app.get("/", response_class=HTMLResponse)

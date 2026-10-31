@@ -1,17 +1,16 @@
 """
-PCA dos sorogrupos de Leptospira (geral + por seroclasse).
 
-Uso no webservice:
-    import geradorPCA
-    PCAS = geradorPCA.carregar_todos(FEATURES_DIR)   # uma vez, na inicialização
-    png_b64 = PCAS["geral"].grafico(protein_scores)   # com a amostra do usuário
+Pca dos sorogrupos (geral + por soroclasse)
 
-Todos os erros previstos levantam PCAError, sempre com uma mensagem clara.
+usos:
+    import
+    inicialisa os pca sem o input (no main)
+    png_b64 = pca com a amostra do usuario
 
-PRIVACIDADE: as mensagens de PCAError NÃO trazem caminhos do servidor nem o
-texto da exceção original. O detalhe técnico continua disponível no terminal,
-porque cada erro é encadeado com "raise ... from exc" (o traceback mostra a
-causa completa).
+todos os erros levantam o PCAError
+    as mensagens nao trazem caminhos do serivor, os detalhes técnicos ficam no terminal
+    cada erro usa raise ____ from exc
+
 """
 import io
 import os
@@ -32,7 +31,7 @@ COLUNAS_NAO_FEATURE = {"Unnamed: 0", COL_SOROGRUPO, COL_CLASSE, "Serogroup"}
 
 _MARCADORES = ["o", "s", "^", "D", "v", "P", "X", "<", ">"]
 
-# Estilo das seroclasses (igual à figura do artigo)
+# estilos das soroclases
 _ROMANOS = {"1": "I", "2": "II", "3": "III", "4": "IV"}
 _ESTILO_CLASSE = {
     "1": ("#66c2a5", "o"),   # verde-água, círculo
@@ -40,14 +39,14 @@ _ESTILO_CLASSE = {
     "3": ("#8da0cb", "D"),   # azul-lavanda, losango
     "4": ("#e78ac3", "^"),   # rosa, triângulo
 }
-# Escala padrão dos gráficos (mesma para o geral e para cada classe).
-# Os eixos nunca ficam menores que isso; se algum ponto (ou a amostra enviada)
-# cair fora, o eixo é ampliado só o suficiente para ele aparecer.
+# escala padrão pros graficos
+# nao ficam menores que isso nao, se cair fora do eixo aumenta so ate o necessário
+
 LIM_X = (-600, 200)
 LIM_Y = (-400, 400)
 PASSO_TICKS = 200
 
-_lock = threading.Lock()  # matplotlib (pyplot) não é thread-safe
+_lock = threading.Lock()  # matplotlib pq o pyplot n é thread safe
 
 
 class PCAError(Exception):
@@ -59,7 +58,7 @@ class PCAModelo:
         self.titulo = titulo
         self.colorir_padrao = colorir_padrao
 
-        # ---- validações da tabela ----------------------------------------
+        # validações da tabela
         if df is None or df.empty:
             raise PCAError(f"[{titulo}] the feature table is empty.")
         if df.shape[1] < 2:
@@ -73,13 +72,13 @@ class PCAModelo:
 
         X = df.drop(columns=[c for c in COLUNAS_NAO_FEATURE if c in df.columns])
         X = X.apply(pd.to_numeric, errors="coerce").fillna(0.0)
-        self.features = list(X.columns)          # mantém todas p/ alinhar com a amostra nova
+        self.features = list(X.columns)        
 
         if X.shape[0] < 2 or X.shape[1] < 2:
             raise PCAError(f"[{titulo}] PCA needs at least 2 samples and 2 features "
                            f"(found {X.shape[0]} samples x {X.shape[1]} features).")
 
-        # ---- ajuste do PCA -----------------------------------------------
+        #ajustes pca
         try:
             self.scaler = StandardScaler() if padronizar else None
             Xv = self.scaler.fit_transform(X) if self.scaler else X.values
@@ -95,10 +94,11 @@ class PCAModelo:
 
     def _orientar(self):
         """
-        O sinal de cada componente é arbitrário; fixamos uma orientação para
-        os gráficos ficarem sempre iguais (e parecidos com a figura do artigo):
-          - geral: seroclasse III à esquerda (PC1) e seroclasse I em cima (PC2)
-          - demais: o lado mais longo do PC1 fica à esquerda
+       
+          sinais arbitrarios dos componentes, orientação fixa para ficar igual o do artigo
+          geral: soroclasse III a esquerda (pc1) e soroclasse I em cima (PC2)
+          demais: lado mais longo do PC1 a esquerda
+          
         """
         inverter = [False, False]
         if self.classe is not None and "3" in set(self.classe):
@@ -110,9 +110,9 @@ class PCAModelo:
         for i, inv in enumerate(inverter):
             if inv:
                 self.scores[:, i] *= -1
-                self.pca.components_[i] *= -1   # mantém projetar() consistente
+                self.pca.components_[i] *= -1   
 
-    # ---- projeção de amostra nova ---------------------------------------
+    #projeção da amostra nova
     def projetar(self, protein_scores: dict):
         """protein_scores = dict {proteína: score} (saída do run_tblastn)."""
         if not isinstance(protein_scores, dict) or not protein_scores:
@@ -129,14 +129,18 @@ class PCAModelo:
         except Exception as exc:
             raise PCAError(f"could not project the sample onto '{self.titulo}'.") from exc
 
-    # ---- gráfico ----------------------------------------------------------
+    # grafico
     def grafico(self, protein_scores=None, colorir_por=None) -> str:
         """
-        PNG em base64. Se protein_scores for passado, desenha a amostra como estrela preta.
-        colorir_por: "sorogrupo" ou "classe". Se None, usa o padrão do modelo
-                     (geral -> classe; por classe -> sorogrupo).
+
+        png em base64
+        desenha a estrela preta quando receve protein_scores
+        colorir_por: sorogrupo ou classe
+        Se None usa o padrão
+        gera -> calsse; por calsse -> sorogrupo
+
         """
-        # projeta ANTES de abrir a figura (se falhar, nada fica aberto)
+        #projetar ANTES DA FIGURA ser aberta se n quebra tudo mds
         p = self.projetar(protein_scores) if protein_scores is not None else None
 
         colorir_por = colorir_por or self.colorir_padrao
@@ -165,7 +169,7 @@ class PCAModelo:
                 if p is not None:
                     ax.scatter(p[0], p[1], marker="*", s=400, c="black", edgecolors="yellow",
                                linewidths=1.2, label="Your sample", zorder=10)
-                # escala: mínimo = LIM_X/LIM_Y, ampliada se houver pontos fora
+                #amplia a escoala se tiver ponto fora dela 
                 pts = self.scores[:, :2] if p is None else np.vstack([self.scores[:, :2], p[:2]])
                 ax.set_xlim(*self._limite(LIM_X, pts[:, 0]))
                 ax.set_ylim(*self._limite(LIM_Y, pts[:, 1]))
@@ -185,7 +189,7 @@ class PCAModelo:
                 raise PCAError(f"could not draw '{self.titulo}'.") from exc
             finally:
                 if fig is not None:
-                    plt.close(fig)      # nunca deixa figura aberta (vazamento de memória)
+                    plt.close(fig)      # FECHAR A FIGURA PELO AMOR DE DEUS (vazemento demmemoria)
         return base64.b64encode(buf.getvalue()).decode()
 
     @staticmethod
@@ -205,8 +209,16 @@ class PCAModelo:
 
 
 def _ler_tsv(features_dir, nome):
-    """Lê um TSV de features. As mensagens citam só o NOME do arquivo (nunca o
-    caminho completo); a causa original fica no traceback (raise ... from exc)."""
+
+    """
+    
+    Lê um TSV de features. As mensagens citam só o NOME do arquivo (nunca o
+    caminho completo); a causa original fica no traceback (raise ... from exc).
+
+
+    ler o .tsv das features
+    mensagens citam apenas nome do arquivo
+    """
     caminho = os.path.join(features_dir, nome)
     if not os.path.isfile(caminho):
         raise PCAError(f"feature table not found: {nome}")
@@ -221,7 +233,11 @@ def _ler_tsv(features_dir, nome):
 
 
 def carregar_todos(features_dir, padronizar=False):
-    """Carrega as 5 tabelas e devolve {"geral": PCAModelo, 1: ..., 2: ..., 3: ..., 4: ...}."""
+    
+    """
+    carregar os PCA uma so vez no começo
+    
+    """
     pcas = {"geral": PCAModelo(_ler_tsv(features_dir, "general_table_identity_rep.tsv"),
                                "General PCA — seroclasses", padronizar,
                                colorir_padrao="classe")}

@@ -4,5 +4,4 @@ temp_jobs/
 .venv/
 venv/
 .env
-data/
 .DS_Store

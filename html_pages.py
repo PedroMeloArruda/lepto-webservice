@@ -1,11 +1,7 @@
-"""Todo o HTML do serviço Leptospira ANI + Serogroup."""
 
 import html
 
-# ─────────────────────────────────────────────
-# BLOCOS REUTILIZÁVEIS
-# ─────────────────────────────────────────────
-
+#reutilisaveis
 P1_WARNING = """
 <tr>
     <td colspan="2" style="background:#fff8e1;border-left:5px solid #f39c12;
@@ -60,9 +56,7 @@ def build_error_page(title, message, hint, log):
     </html>"""
 
 
-# ─────────────────────────────────────────────
-# BLOCOS DA PÁGINA DE RESULTADOS
-# ─────────────────────────────────────────────
+#resultados
 
 def build_ani_top3_html(top3):
     rows = ""
@@ -204,9 +198,7 @@ def build_pca_html(sg_result, pcas, log):
         return ""
 
 
-# ─────────────────────────────────────────────
-# PÁGINAS COMPLETAS
-# ─────────────────────────────────────────────
+#pagina completona
 
 def build_results_page(ani_result, sg_html, pca_html, log):
     """Página de resultados. Chame DEPOIS de build_pca_html, para que o
